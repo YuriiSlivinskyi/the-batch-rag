@@ -138,6 +138,15 @@ def parse_and_save_article(url: str, folder_path: str):
 
 
 def get_all_articles_from_current_page(soup: BeautifulSoup, url: str) -> list[str]:
+    """
+    Helper function for getting all articles from current page.
+    Args:
+        soup: BeautifulSoup object to scrape the articles from
+        url: link to page with articles
+
+    Returns:
+        list[str]: list of articles links
+    """
     base_url = f"{urlsplit(url).scheme}://{urlsplit(url).netloc}"
     soup = soup.find('div', class_="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-11")
 
@@ -271,6 +280,7 @@ def parse_paged_articles(url: str, category: str) -> list[str]:
 
 
 def run_in_threads(tasks_to_process: list, max_workers: int = 8):
+    """Helper function to ease using multithreading."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(task[0], *task[1]) for task in tasks_to_process]
 
@@ -282,6 +292,14 @@ def run_in_threads(tasks_to_process: list, max_workers: int = 8):
 
 
 def get_complete_data(url: str = "https://www.deeplearning.ai/the-batch/"):
+    """
+    Main function to scrape the complete article pages. Saves all data in .data directory
+    Args:
+        url: url to the main the batch page
+
+    Returns:
+        None
+    """
     base_url = f"{urlsplit(url).scheme}://{urlsplit(url).netloc}"
     response = requests.get(url)
     response.raise_for_status()
