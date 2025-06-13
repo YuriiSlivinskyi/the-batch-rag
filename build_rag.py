@@ -27,26 +27,27 @@ If context isn't relevant or if you can't assist user answer using "I can not as
 def get_complete_answer(rsp, ctx):
     rag_rsp_str = rsp.response
     ctx_str = ''
-    for node in ctx:
-        if isinstance(node.node, TextNode):
-            ctx_piece = f"""Article name: {node.metadata['file_name'].split('.')[0]}
+    for node in rsp.metadata['text_nodes']:
+        ctx_piece = f"""Article name: {node.metadata['file_name'].split('.')[0]}
             Relevant content: {node.text}
 
             """
-            ctx_str += ctx_piece
+        ctx_str += ctx_piece
 
     relevant_images = []
     img_nodes = []
-    for node in ctx:
-        if isinstance(node.node, ImageNode):
-            relevant_images.append(node.metadata['file_path'])
-            img_nodes.append(node)
+    for node in rsp.metadata["image_nodes"]:
+        relevant_images.append(node.metadata['file_path'])
+        img_nodes.append(node)
 
     fig = None
     if len(relevant_images) > 0:
         if len(relevant_images) == 1:
             img = Image.open(relevant_images[0])
             fig = plt.imshow(img)
+            fig = fig.get_figure()
+            ax = fig.get_axes()[0]
+            ax.axis('off')
         if len(relevant_images) > 1:
             if len(relevant_images) <= 4:
                 fig, axs = plt.subplots(2, 2, figsize=(14, 10))
@@ -95,21 +96,22 @@ def get_input_files(directory_path):
 
 
 def ask(question: str, vec_retr, llm):
-    raw_context = vec_retr.retrieve(question)
-    context = []
-    for node in raw_context:
-        if node.score >= .7:
-            context.append(node)
+    context = vec_retr.retrieve(question)
+
     text_ctx = []
+    text_nodes = []
     img_ctx = []
     img_nodes = []
 
     for node in context:
         if 'text' in node.metadata['file_type']:
-            text_ctx.append(node.text)
+            if node.score >= .5:
+                text_ctx.append(node.text)
+                text_nodes.append(node)
         if 'image' in node.metadata['file_type']:
-            img_ctx.append(ImageBlock(path=node.metadata['file_path']))
-            img_nodes.append(node)
+            if node.score > .2:
+                img_ctx.append(ImageBlock(path=node.metadata['file_path']))
+                img_nodes.append(node)
 
     text_ctx_str = '\n'.join(text_ctx)
 
@@ -124,7 +126,7 @@ def ask(question: str, vec_retr, llm):
         response=str('\n'.join([block.text for block in answer.message.blocks])),
         source_nodes=context,
         metadata={
-            "text_nodes": text_ctx,
+            "text_nodes": text_nodes,
             "image_nodes": img_nodes,
         },
     )
@@ -147,16 +149,15 @@ def main():
 
     index = MultiModalVectorStoreIndex(nodes,
                                        embed_model=text_embeddings,
-                                       image_embed_model=clip_embedding,
-                                       similarity_top_k=10)
+                                       image_embed_model=clip_embedding)
 
     index.storage_context.persist(persist_dir=".index")
 
     vec_retr = index.as_retriever(
-        similarity_tok_k=10,
+        similarity_top_k=10,
         image_similarity_top_k=3,
-        mmr=True,
-        mmr_diversity_bias=0.5,
+        vector_store_query_mode='mmr',
+        vector_store_kwargs={"mmr_threshold": 0.8}
     )
 
     nest_asyncio.apply()

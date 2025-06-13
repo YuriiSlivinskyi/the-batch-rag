@@ -23,10 +23,10 @@ def load_artifacts():
                                     image_embed_model=clip_embedding)
 
     vec_retr = index.as_retriever(
-        similarity_tok_k=10,
+        similarity_top_k=10,
         image_similarity_top_k=3,
-        mmr=True,
-        mmr_diversity_bias=0.5,
+        vector_store_query_mode='mmr',
+        vector_store_kwargs={"mmr_threshold": 0.8}
     )
 
     return index, vec_retr, llm

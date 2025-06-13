@@ -5,6 +5,7 @@
 ``python -m venv .venv``
 3. Install all dependencies using 
 ``pip install -r requirements.txt``
+4. Create .env file with **GOOGLE_API_KEY** value
 
 ## Data Scrapping
 
