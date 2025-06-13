@@ -16,7 +16,10 @@ To run the scraping use
 
 The index is stored in *.index* folder in default llamaindex format.
 \
-To run indexing use ``python build_rag.py``
+After building the RAG evaluation of faithfulness and relevance is made. 
+\
+To run indexing use ``python build_rag.py`` \
+**Note**: evaluation dataset is created only on 1 document to preserve token quota.
 
 ## Demo
 
