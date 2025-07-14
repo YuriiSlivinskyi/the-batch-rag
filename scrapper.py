@@ -177,6 +177,7 @@ def parse_articles_after_loading(url: str, category: str) -> list[str]:
     and then scrapes the URLs of all <article> elements.
 
     Args:
+        category: category name to save article to
         url: The URL of the target page.
 
     Returns:
@@ -229,6 +230,7 @@ def parse_paged_articles(url: str, category: str) -> list[str]:
     and then scrapes the URLs of all <article> elements.
 
     Args:
+        category: category name to save article to
         url: The URL of the target page.
 
     Returns:

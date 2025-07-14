@@ -18,13 +18,16 @@ from llama_index.retrievers.bm25 import BM25Retriever
 
 app = FastAPI()
 
+
 class QuestionRequest(BaseModel):
     question: str
+
 
 class AnswerResponse(BaseModel):
     response: str
     context: str
     image_base64: Optional[str] = None
+
 
 def load_artifacts():
     clip_embedding, text_embeddings, llm = load_pretrained()
@@ -77,13 +80,15 @@ def load_artifacts():
     )
     return adv_engine
 
+
 engine = load_artifacts()
+
 
 @app.post("/ask", response_model=AnswerResponse)
 def ask_question(request: QuestionRequest):
     try:
         rsp, ctx = ask(request.question, engine)
-        rag_rsp_str, ctx_str, fig = get_complete_answer(rsp, ctx)
+        rag_rsp_str, ctx_str, fig = get_complete_answer(rsp)
         img_b64 = None
         if fig:
             buf = BytesIO()
@@ -96,4 +101,4 @@ def ask_question(request: QuestionRequest):
             img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
         return AnswerResponse(response=rag_rsp_str, context=ctx_str, image_base64=img_b64)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))

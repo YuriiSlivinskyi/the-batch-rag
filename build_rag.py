@@ -39,7 +39,7 @@ Your goal is to deliver highly accurate, detailed, and contextually grounded ans
 """
 
 
-def get_complete_answer(rsp, ctx):
+def get_complete_answer(rsp):
     rag_rsp_str = rsp.response
     ctx_str = ''
     for node in rsp.metadata['text_nodes']:
@@ -215,27 +215,27 @@ def main():
     faithfulness_evaluator = FaithfulnessEvaluator()
     relevancy_eval = RelevancyEvaluator()
 
-    def measure_faitfulness(query, vec_retr, llm):
-        r, c = ask(query, vec_retr, llm)
+    def measure_faitfulness(query, engine):
+        r, c = ask(query, engine)
         eval_result = faithfulness_evaluator.evaluate_response(response=r, query=query)
         return eval_result
 
-    def measure_relevancy(query, vec_retr, llm):
-        r, c = ask(query, vec_retr, llm)
+    def measure_relevancy(query, engine):
+        r, c = ask(query, engine)
         eval_result = relevancy_eval.evaluate_response(response=r, query=query)
         return eval_result
 
     print('Testing query:\n', test_query)
-    rsp, ctx = ask(test_query, vec_retr, llm)
-    rsp_str, ctx_str, _ = get_complete_answer(rsp, ctx)
+    rsp, ctx = ask(test_query, adv_engine)
+    rsp_str, ctx_str, _ = get_complete_answer(rsp)
 
     print("RAG's response:\n", rsp_str)
     print("Text context:\n", ctx_str)
 
-    faitfulness = measure_faitfulness(test_query, vec_retr, llm)
+    faitfulness = measure_faitfulness(test_query, adv_engine)
     print("Faithfulness:\t", faitfulness.score, faitfulness.passing)
 
-    relevancy = measure_relevancy(test_query, vec_retr, llm)
+    relevancy = measure_relevancy(test_query, adv_engine)
     print("Relevancy:\t", relevancy.score, relevancy.passing)
     return
 

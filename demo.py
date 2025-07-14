@@ -81,13 +81,13 @@ def load_artifacts():
 
     return index, adv_engine, llm
 
-def main():
 
+def main():
     index, engine, llm = load_artifacts()
 
     def process_question(question):
         rsp, ctx = ask(question, engine)
-        rag_rsp_str, ctx_str, fig = get_complete_answer(rsp, ctx)
+        rag_rsp_str, ctx_str, fig = get_complete_answer(rsp)
 
         if fig:
             buf = BytesIO()
@@ -99,7 +99,6 @@ def main():
         if fig is None:
             img = None
         return rag_rsp_str, ctx_str, img
-
 
     with gr.Blocks() as demo:
         gr.Markdown("## Enter your question")
