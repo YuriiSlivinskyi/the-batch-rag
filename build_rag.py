@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+
 import os
 
 import matplotlib.pyplot as plt
@@ -5,22 +7,35 @@ import nest_asyncio
 from PIL import Image
 from dotenv import load_dotenv
 from llama_index.core import SimpleDirectoryReader, Settings
-from llama_index.core.base.response.schema import Response
 from llama_index.core.evaluation import FaithfulnessEvaluator
-from llama_index.core.evaluation import RelevancyEvaluator
+from llama_index.core.evaluation import (
+    RelevancyEvaluator,
+)
 from llama_index.core.evaluation import generate_question_context_pairs
 from llama_index.core.indices import MultiModalVectorStoreIndex
-from llama_index.core.llms import ChatMessage, ImageBlock
+from llama_index.core.llms import ImageBlock
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.core.schema import TextNode, ImageNode
+from llama_index.core.postprocessor import SentenceTransformerRerank
+from llama_index.core.prompts import ChatPromptTemplate, ChatMessage
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.response_synthesizers import get_response_synthesizer
+from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.embeddings.clip import ClipEmbedding
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.google_genai import GoogleGenAI
+from llama_index.retrievers.bm25 import BM25Retriever
 
 system_template = """
-You are asistant providing answers and information to users. Use information only from provided context which includes text and possibly images, do not use any internal knowledge.
-Give complete and detailed answers.
-If context isn't relevant or if you can't assist user answer using "I can not assist you with this question."
+"You are an expert AI assistant specializing in artificial intelligence and machine learning, dedicated to providing insightful and comprehensive answers to user queries. 
+Your primary source of information is the provided context, which consists of articles and potentially images from DeepLearning.AI's 'The Batch' newsletter.
+
+Instructions:
+Strictly adhere to the provided context: Do not use any prior internal knowledge, external sources, or make assumptions. All information in your answer must be directly supported by the provided text and images.
+Provide complete and detailed answers: Strive for thoroughness. Explain concepts, summarize findings, and elaborate on details as presented in the context. Avoid short, superficial, or overly general responses. Imagine you are explaining the topic to someone who needs a clear and comprehensive understanding based solely on the provided materials.
+If images are provided in the context, carefully analyze them and incorporate relevant visual information into your textual answer where appropriate to enrich the explanation.
+Maintain a helpful and informative tone.
+If, after careful review, you determine that the provided context does not contain the information necessary to answer the user's question, or if the context is entirely irrelevant to the query, respond with: "I cannot assist you with this question as the provided context does not contain relevant information."
+Your goal is to deliver highly accurate, detailed, and contextually grounded answers that reflect the depth and breadth of information available in 'The Batch' articles provided."
 """
 
 
@@ -95,8 +110,9 @@ def get_input_files(directory_path):
     return all_files
 
 
-def ask(question: str, vec_retr, llm):
-    context = vec_retr.retrieve(question)
+def ask(question: str, engine):
+    rsp = engine.query(question)
+    context = rsp.source_nodes
 
     text_ctx = []
     text_nodes = []
@@ -109,28 +125,14 @@ def ask(question: str, vec_retr, llm):
                 text_ctx.append(node.text)
                 text_nodes.append(node)
         if 'image' in node.metadata['file_type']:
-            if node.score > .2:
+            if node.score is not None:
                 img_ctx.append(ImageBlock(path=node.metadata['file_path']))
                 img_nodes.append(node)
 
-    text_ctx_str = '\n'.join(text_ctx)
+    rsp.metadata['text_nodes'] = text_nodes
+    rsp.metadata['image_nodes'] = img_nodes
 
-    sys_msg = ChatMessage(role='system', content=system_template)
-    ctx_msg = ChatMessage(role="system", content=f"Context:\n{text_ctx_str}")
-    if img_ctx:
-        for img in img_ctx:
-            ctx_msg.blocks.append(img)
-    usr_msg = ChatMessage(role="user", content=f"{question}")
-    answer = llm.chat(messages=[sys_msg, ctx_msg, usr_msg])
-    response = Response(
-        response=str('\n'.join([block.text for block in answer.message.blocks])),
-        source_nodes=context,
-        metadata={
-            "text_nodes": text_nodes,
-            "image_nodes": img_nodes,
-        },
-    )
-    return response, context
+    return rsp, context
 
 
 def main():
@@ -154,10 +156,45 @@ def main():
     index.storage_context.persist(persist_dir=".index")
 
     vec_retr = index.as_retriever(
-        similarity_top_k=10,
+        similarity_top_k=5,
         image_similarity_top_k=3,
         vector_store_query_mode='mmr',
         vector_store_kwargs={"mmr_threshold": 0.8}
+    )
+
+    bm25_retr = BM25Retriever.from_defaults(
+        nodes=nodes,
+        similarity_top_k=5
+    )
+
+    hybrid_retr = QueryFusionRetriever(
+        retrievers=[vec_retr, bm25_retr],
+        similarity_top_k=5,
+        mode="reciprocal_rerank"
+    )
+
+    reranker = SentenceTransformerRerank(
+        model="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        top_n=5
+    )
+
+    chat_tpl = ChatPromptTemplate(
+        message_templates=[
+            ChatMessage(role="system", content=system_template),
+            ChatMessage(role="system", content="Context:\n{context_str}"),
+            ChatMessage(role="user", content="{query_str}")
+        ]
+    )
+
+    response_synth = get_response_synthesizer(
+        response_mode="compact",
+        text_qa_template=chat_tpl
+    )
+
+    adv_engine = RetrieverQueryEngine(
+        retriever=hybrid_retr,
+        node_postprocessors=[reranker],
+        response_synthesizer=response_synth,
     )
 
     nest_asyncio.apply()
