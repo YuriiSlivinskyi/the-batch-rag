@@ -88,6 +88,7 @@ def main():
     def process_question(question):
         rsp, ctx = ask(question, engine)
         rag_rsp_str, ctx_str, fig = get_complete_answer(rsp)
+        img = None
 
         if fig:
             buf = BytesIO()

@@ -1,5 +1,3 @@
-from dotenv import load_dotenv
-
 import os
 
 import matplotlib.pyplot as plt
@@ -7,11 +5,15 @@ import nest_asyncio
 from PIL import Image
 from dotenv import load_dotenv
 from llama_index.core import SimpleDirectoryReader, Settings
-from llama_index.core.evaluation import FaithfulnessEvaluator
 from llama_index.core.evaluation import (
+    FaithfulnessEvaluator,
     RelevancyEvaluator,
+    AnswerRelevancyEvaluator,
+    ContextRelevancyEvaluator,
+    CorrectnessEvaluator,
+    SemanticSimilarityEvaluator,
+    generate_question_context_pairs,
 )
-from llama_index.core.evaluation import generate_question_context_pairs
 from llama_index.core.indices import MultiModalVectorStoreIndex
 from llama_index.core.llms import ImageBlock
 from llama_index.core.node_parser import SentenceSplitter
@@ -56,6 +58,7 @@ def get_complete_answer(rsp):
         img_nodes.append(node)
 
     fig = None
+    axs = None
     if len(relevant_images) > 0:
         if len(relevant_images) == 1:
             img = Image.open(relevant_images[0])
@@ -135,6 +138,20 @@ def ask(question: str, engine):
     return rsp, context
 
 
+def generate_custom_qa_dataset(documents, llm, num_questions=15):
+    from llama_index.core.evaluation.dataset_generation import DatasetGenerator
+    splitter = SentenceSplitter(chunk_size=256, chunk_overlap=50)
+    nodes = splitter.get_nodes_from_documents(documents)
+    generator = DatasetGenerator(nodes, llm=llm, num_questions_per_chunk=5)
+    qa_dataset = generator.generate_dataset_from_nodes(num=num_questions)
+    pairs = []
+    for idx, (q, _) in enumerate(qa_dataset.qr_pairs):
+        node = nodes[idx % len(nodes)]
+        file_name = node.metadata.get('file_name', 'unknown')
+        pairs.append((q, file_name, node.text))
+    return pairs
+
+
 def main():
     clip_embedding, text_embeddings, llm = load_pretrained()
 
@@ -143,8 +160,8 @@ def main():
     Settings.image_embed_model = clip_embedding
 
     input_files = get_input_files('.data')
-
-    documents = SimpleDirectoryReader(input_files=input_files).load_data()
+    text_files = [f for f in input_files if f.endswith('.txt')]
+    documents = SimpleDirectoryReader(input_files=text_files).load_data()
 
     splitter = SentenceSplitter(chunk_size=256, chunk_overlap=50)
     nodes = splitter.get_nodes_from_documents(documents)
@@ -199,45 +216,32 @@ def main():
 
     nest_asyncio.apply()
 
-    eval_llm = GoogleGenAI(
-        model="gemini-2.0-flash-lite"
-    )
-
-    qa_dataset = generate_question_context_pairs(
-        [documents[0]],
-        llm=eval_llm,
-        num_questions_per_chunk=2
-    )
-
-    test_query = "Provide information about how deepfakes can hurt people"
-    print('Using testing query to evaluate perfomance, QA dataset created, but not used to preserve token LLM quota')
-
+    qa_pairs = generate_custom_qa_dataset(documents, llm, num_questions=15)
     faithfulness_evaluator = FaithfulnessEvaluator()
-    relevancy_eval = RelevancyEvaluator()
-
-    def measure_faitfulness(query, engine):
-        r, c = ask(query, engine)
-        eval_result = faithfulness_evaluator.evaluate_response(response=r, query=query)
-        return eval_result
-
-    def measure_relevancy(query, engine):
-        r, c = ask(query, engine)
-        eval_result = relevancy_eval.evaluate_response(response=r, query=query)
-        return eval_result
-
-    print('Testing query:\n', test_query)
-    rsp, ctx = ask(test_query, adv_engine)
-    rsp_str, ctx_str, _ = get_complete_answer(rsp)
-
-    print("RAG's response:\n", rsp_str)
-    print("Text context:\n", ctx_str)
-
-    faitfulness = measure_faitfulness(test_query, adv_engine)
-    print("Faithfulness:\t", faitfulness.score, faitfulness.passing)
-
-    relevancy = measure_relevancy(test_query, adv_engine)
-    print("Relevancy:\t", relevancy.score, relevancy.passing)
-    return
+    relevancy_evaluator = RelevancyEvaluator()
+    answer_relevancy_evaluator = AnswerRelevancyEvaluator(llm=llm)
+    context_relevancy_evaluator = ContextRelevancyEvaluator(llm=llm)
+    correctness_evaluator = CorrectnessEvaluator(llm=llm)
+    semantic_similarity_evaluator = SemanticSimilarityEvaluator(embed_model=text_embeddings)
+    print("\nEvaluating...")
+    for idx, (question, file_name, reference_text) in enumerate(qa_pairs):
+        print(f"\n=== QA Pair {idx+1} ===")
+        print(f"Question: {question}")
+        print(f"File: {file_name}")
+        rsp, _ = ask(question, adv_engine)
+        answer = rsp.response
+        faith = faithfulness_evaluator.evaluate_response(response=rsp, query=question)
+        print(f"Faithfulness: score={faith.score}, passing={faith.passing}")
+        rel = relevancy_evaluator.evaluate_response(response=rsp, query=question)
+        print(f"Relevancy: score={rel.score}, passing={rel.passing}")
+        ans_rel = answer_relevancy_evaluator.evaluate_response(query=question, response=answer)
+        print(f"AnswerRelevancy: score={ans_rel.score}, feedback={ans_rel.feedback}")
+        ctx_rel = context_relevancy_evaluator.evaluate_response(query=question, contexts=[reference_text])
+        print(f"ContextRelevancy: score={ctx_rel.score}, feedback={ctx_rel.feedback}")
+        corr = correctness_evaluator.evaluate_response(query=question, response=answer, reference=reference_text)
+        print(f"Correctness: score={corr.score}, feedback={corr.feedback}")
+        sem = semantic_similarity_evaluator.evaluate_response(response=answer, reference=reference_text)
+        print(f"SemanticSimilarity: score={sem.score}, passing={sem.passing}")
 
 
 if __name__ == '__main__':

@@ -190,7 +190,7 @@ def parse_articles_after_loading(url: str, category: str) -> list[str]:
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     driver = webdriver.Chrome(options=options)
-
+    soup = None
     try:
         driver.get(url)
         print(f"Successfully navigated to {url}")
